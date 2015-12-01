@@ -7,56 +7,34 @@ import cPickle
 from sklearn.preprocessing import LabelEncoder
 from learners import LearnerSuite
 from sklearn.tree import DecisionTreeClassifier
+from sklearn import svm
+from sklearn.linear_model import SGDClassifier
+from sklearn.neighbors import KNeighborsClassifier
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.cross_validation import train_test_split
 from sklearn.metrics import confusion_matrix
-
-def transform_data(df):
-    df.rename(columns={'homeowner': 'is_homeowner', 'married_couple': 'is_married_couple'}, inplace=True)
-
-    # convert car_value from letters to numbers
-    uvals = np.sort(df['car_value'].unique())
-    carv_mapping = {cv: v for cv, v in zip(uvals, range(1, len(uvals)+1))}
-    df['car_value'] = df['car_value'].map(carv_mapping)
-
-    for state in df['state'].unique():
-        df['is_' + state] = df['state'] == state
-
-    df['is_C_previous_nan'] = df['C_previous'].isnull()
-    df['is_C_previous_1'] = df['C_previous'] == 1
-    df['is_C_previous_2'] = df['C_previous'] == 2
-    df['is_C_previous_3'] = df['C_previous'] == 3
-    df['is_C_previous_4'] = df['C_previous'] == 4
-
-    for gs in np.sort(df['group_size'].unique()):
-        df['is_group_size_' + str(gs)] = df['group_size'] == gs
-
-    df['is_Mon'] = df['day'] == 0
-    df['is_Tue'] = df['day'] == 1
-    df['is_Wed'] = df['day'] == 2
-    df['is_Thu'] = df['day'] == 3
-    df['is_Fri'] = df['day'] == 4
-    df['is_Sat'] = df['day'] == 5
-    df['is_Sun'] = df['day'] == 6
-
-    fill_values = {'risk_factor': df['risk_factor'].mean(), 'duration_previous': df['duration_previous'].mean()}
-    df['is_risk_factor_missing'] = pd.isnull(df['risk_factor'])
-    df['is_duration_previous_missing'] = pd.isnull(df['duration_previous'])
-    df = df.fillna(value=fill_values)
-
-    not_predictors = ['time', 'record_type', 'day', 'state', 'location', 'group_size', 'C_previous']
-
-    df = df.drop(not_predictors, axis=1)
-
-    return df
+from sklearn.ensemble import AdaBoostClassifier
+from sklearn.ensemble import GradientBoostingClassifier
 
 # Instantiates a class that runs GridSearchCV on a variety of models
 def get_best_clf(X_train, y_train, category):
-	models = [DecisionTreeClassifier(),
-			  RandomForestClassifier(n_estimators=300, oob_score=True, n_jobs=2, max_depth=30)]
+	models = [
+			  #DecisionTreeClassifier(), 
+			  GradientBoostingClassifier(n_estimators=300, learning_rate=1.0, max_depth=30, random_state=1),
+			  RandomForestClassifier(n_estimators=300, oob_score=True, n_jobs=2, max_depth=30), 
+			  #KNeighborsClassifier(), 
+			  #AdaBoostClassifier(n_estimators=100), 
+			  svm.SVC(), 
+			  #SGDClassifier(loss="hinge", penalty="l2")
+		]
 
 	tuning_ranges = {'DecisionTreeClassifier': {'max_depth': [5, 10, 20, 50, None]},
-					 'RandomForestClassifier': {'max_features': list(np.unique(np.logspace(np.log10(2), np.log10(X_train.shape[1] - 1), 5).astype(np.int)))}}
+					 'RandomForestClassifier': {'max_features': list(np.unique(np.logspace(np.log10(2), np.log10(X_train.shape[1] - 1), 5).astype(np.int)))}, 
+					 'GradientBoostingClassifier':{}, 
+					 'SVC': {}, 
+					 'SGDClassifier': {}, 
+					 'KNeighborsClassifier':{}, 
+					 'AdaBoostClassifier':{}}
 
 	suite = LearnerSuite(tuning_ranges=tuning_ranges, njobs=1,
                                     cv=5, verbose=True, models=models)
@@ -144,15 +122,11 @@ def main(train_df, test_df):
 
 if __name__ == '__main__':
 
-	df = pd.read_csv('./data/train.csv')
+	df = pd.read_csv('./data/complete.csv')
 	
-	df.set_index(['customer_ID', 'shopping_pt'], inplace=True)
+	df.set_index(['customer_ID'], inplace=True)
 
 	customer_ids = df.index.get_level_values(0).unique()
-
-	df = df.select(lambda x: x[0] < customer_ids[100], axis=0)
-
-	df = transform_data(df)
 
 	msk = np.random.rand(len(customer_ids)) < 0.8
 
