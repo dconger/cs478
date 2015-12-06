@@ -3,7 +3,8 @@ import operator
 import matplotlib.pyplot as plt
 import pandas as pd
 import cPickle
-
+import sys
+from sklearn.externals import joblib
 from sklearn.preprocessing import LabelEncoder
 from learners import LearnerSuite
 from sklearn.tree import DecisionTreeClassifier
@@ -16,124 +17,135 @@ from sklearn.metrics import confusion_matrix
 from sklearn.ensemble import AdaBoostClassifier
 from sklearn.ensemble import GradientBoostingClassifier
 
+
 # Instantiates a class that runs GridSearchCV on a variety of models
 def get_best_clf(X_train, y_train, category):
-	models = [
-			  #DecisionTreeClassifier(), 
-			  GradientBoostingClassifier(n_estimators=300, learning_rate=1.0, max_depth=30, random_state=1),
-			  RandomForestClassifier(n_estimators=300, oob_score=True, n_jobs=2, max_depth=30), 
-			  #KNeighborsClassifier(), 
-			  #AdaBoostClassifier(n_estimators=100), 
-			  svm.SVC(), 
-			  #SGDClassifier(loss="hinge", penalty="l2")
-		]
 
-	tuning_ranges = {'DecisionTreeClassifier': {'max_depth': [5, 10, 20, 50, None]},
-					 'RandomForestClassifier': {'max_features': list(np.unique(np.logspace(np.log10(2), np.log10(X_train.shape[1] - 1), 5).astype(np.int)))}, 
-					 'GradientBoostingClassifier':{}, 
-					 'SVC': {}, 
-					 'SGDClassifier': {}, 
-					 'KNeighborsClassifier':{}, 
-					 'AdaBoostClassifier':{}}
+    models = [
+        RandomForestClassifier(n_estimators=300, oob_score=True, n_jobs=-1, max_depth=30),
+        # DecisionTreeClassifier(),
+        # GradientBoostingClassifier(n_estimators=300, learning_rate=1.0, max_depth=30, random_state=1),
+        # KNeighborsClassifier(),
+        # AdaBoostClassifier(n_estimators=300),
+        # svm.SVC(),
+        # SGDClassifier(loss="hinge", penalty="l2")
+    ]
+    tuning_ranges = {
+        'RandomForestClassifier': {'max_features': list(np.unique(np.logspace(np.log10(2), np.log10(X_train.shape[1] - 1), 5).astype(np.int)))},
+        'DecisionTreeClassifier': {'max_depth': [5, 10, 20, 50, None]},
+        'GradientBoostingClassifier': {},
+        'SVC': {},
+        'SGDClassifier': {},
+        'KNeighborsClassifier': {},
+        'AdaBoostClassifier': {}
+    }
 
-	suite = LearnerSuite(tuning_ranges=tuning_ranges, njobs=1,
-                                    cv=5, verbose=True, models=models)
+    suite = LearnerSuite(tuning_ranges=tuning_ranges, njobs=1, cv=5, verbose=True, models=models)
 
-	suite.fit(X_train, y_train)
+    suite.fit(X_train, y_train)
 
-	print 'Accuracy scores when classifying on {}:'.format(category)
+    for modelName in suite.best_models:
+        joblib.dump(suite.best_models[modelName], "trainedModels/" + category + "_" + modelName + '.pkl')
 
-	for model_name in suite.best_scores:
-		print model_name, suite.best_scores[model_name]
+    print 'Accuracy scores when classifying on {}:'.format(category)
 
-	model_scores = {model_name: suite.best_scores[model_name] for model_name in suite.best_scores}
+    for model_name in suite.best_scores:
+        print model_name, suite.best_scores[model_name]
 
-	best_model = max(model_scores.iteritems(), key=operator.itemgetter(1))[0]
+    model_scores = {model_name: suite.best_scores[model_name] for model_name in suite.best_scores}
 
-	print 'Best model for Category {}: {}'.format(category, best_model)
+    best_model = max(model_scores.iteritems(), key=operator.itemgetter(1))[0]
 
-	clf = suite.best_models[best_model]
+    print 'Best model for Category {}: {}'.format(category, best_model)
 
-	return clf
+    clf = suite.best_models[best_model]
+
+    return clf
+
+
+def get_x_y_df(df, category, categories):
+    input_df = train_df.copy(deep=True)
+    y = input_df[category].values
+    input_df = input_df.drop(categories, axis=1)
+    x = input_df.values
+    return x, y
+
 
 # Creates a dictionary of the best model for each Product category
-def get_category_models(train_df, categories):
-	
-	clf_dict = dict()
+def get_category_models(train_df, categories, load_pre_built):
+    clf_dict = dict()
 
-	for category in categories:
-		input_df = train_df.copy(deep=True)
-		y_train = input_df[category].values
-		input_df = input_df.drop(categories, axis=1)
-		X_train = input_df.values
-		clf_dict[category] = get_best_clf(X_train, y_train, category)
+    for category in categories:
+        if load_pre_built:
+            clf_dict[category] = joblib.load('full-set-trained-models/' + category + '_str.pkl')
+        else:
+            x_train, y_train = get_x_y_df(train_df, category, categories)
+            clf_dict[category] = get_best_clf(x_train, y_train, category)
 
-	return clf_dict
+    return clf_dict
+
 
 def measure_accuracy(y_test, y_pred):
-	confmat = confusion_matrix(y_true=y_test, y_pred=y_pred)
-	print 'Confusion Matrix: '
-	print confmat
+    print 'Confusion Matrix: '
+    print confusion_matrix(y_true=y_test, y_pred=y_pred)
+
 
 def predict_all(clf_dict, test_df, categories):
+    predictions = []
 
-	predictions = []
+    for key, value in clf_dict.iteritems():
+        y_test, x_test = get_x_y_df(test_df, key, categories)
+        y_pred = value.predict(x_test)
+        measure_accuracy(y_test, y_pred)
+        predictions.append(y_pred)
 
-	for key, value in clf_dict.iteritems():
-		test_df_copy = test_df.copy(deep=True)
-		y_test = test_df_copy[key]
-		test_df_copy = test_df_copy.drop(categories, axis=1)
-		X_test = test_df_copy.values
-		clf = value
-		y_pred = clf.predict(X_test)
-		measure_accuracy(y_test, y_pred)
-		predictions.append(y_pred)
-
-	return predictions
+    return predictions
 
 
-def measure_total_accuracy(predictions_df, test_df):
-	categories = ['A', 'B', 'C', 'D', 'E', 'F', 'G']
-	test_df_categories = test_df[categories]
-	comparison = predictions_df.values == test_df_categories.values
+def measure_total_accuracy(models, test_df, categories):
+    category_dfs = dict()
+    for category in categories:
+        x_df, y_df = get_x_y_df(test_df, category, categories)
+        category_dfs[category] = (x_df, y_df)
 
-	correct = 0
-	
-	for item in comparison:
-		if False in item:
-			pass
-		else:
-			correct += 1
+    correct_count = 0
 
-	return float(correct) / float(len(test_df))
+    for i in range(0, len(test_df)):
+        all_correct = True
+        for category in categories:
+            (x_df, y_df) = category_dfs[category]
+            prediction = models[category].predict(x_df[i])
+            if prediction != y_df[i]:
+                all_correct = False
+        if all_correct:
+            correct_count += 1
+
+    return float(correct_count) / float(len(test_df))
+
 
 def main(train_df, test_df):
-	categories = ['A', 'B', 'C', 'D', 'E', 'F', 'G']
+    categories = ['A', 'B', 'C', 'D', 'E', 'F', 'G']
 
-	clf_dict = get_category_models(train_df, categories)
+    clf_dict = get_category_models(train_df, categories, len(sys.argv) > 1 and sys.argv[1] == "-p")
 
-	predictions = predict_all(clf_dict, test_df, categories)
-	predictions_df = pd.DataFrame(predictions).T
-	predictions_df.columns = categories
-	
-	total_accuracy = measure_total_accuracy(predictions_df, test_df)
+    total_accuracy = measure_total_accuracy(clf_dict, test_df, categories)
 
-	'Total Accuracy on Test Set is:', total_accuracy
+    print 'Total Accuracy on Test Set is: {}'.format(total_accuracy)
+
 
 if __name__ == '__main__':
+    df = pd.read_csv('./data/complete-full-set.csv')
 
-	df = pd.read_csv('./data/complete.csv')
-	
-	df.set_index(['customer_ID'], inplace=True)
+    df.set_index(['customer_ID'], inplace=True)
 
-	customer_ids = df.index.get_level_values(0).unique()
+    customer_ids = df.index.get_level_values(0).unique()
 
-	msk = np.random.rand(len(customer_ids)) < 0.8
+    msk = np.random.rand(len(customer_ids)) < 0.8
 
-	train_cust_ids = customer_ids[msk]
-	test_cust_ids = customer_ids[~msk]
+    train_cust_ids = customer_ids[msk]
+    test_cust_ids = customer_ids[~msk]
 
-	train_df = df[df.index.get_level_values(0).isin(train_cust_ids)]
-	test_df = df[df.index.get_level_values(0).isin(test_cust_ids)]
+    train_df = df[df.index.get_level_values(0).isin(train_cust_ids)]
+    test_df = df[df.index.get_level_values(0).isin(test_cust_ids)]
 
-	main(train_df, test_df)
+    main(train_df, test_df)
